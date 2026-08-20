@@ -183,7 +183,10 @@ local function StartMainHub()
 
     CreateWinBtn("L", function() isLocked = not isLocked; MainFrame.Draggable = not isLocked end)
     CreateWinBtn("_", function() MainFrame.Visible = false end)
-    CreateWinBtn("X", function() ScreenGui:Destroy() end)
+    CreateWinBtn("X", function() 
+        pcall(function() fovCircle:Remove() end)
+        ScreenGui:Destroy() 
+    end)
 
     local TabSidebar = Instance.new("Frame", MainFrame)
     TabSidebar.Size = UDim2.new(0, 110, 1, -30)
@@ -257,16 +260,69 @@ local function StartMainHub()
         return box
     end
 
-    local isFlying, isESP, isNoclip, isShiftLock = false, false, false, false
+    -- Переменные функционала
+    local isFlying, isESP, isNoclip, isShiftLock, isAimEnabled, isFovVisible = false, false, false, false, false, true
     local isSpeedEnabled, isStdJumpEnabled, isInfJumpEnabled = false, false, false
     local flySpeed, walkSpeed, jumpPower = 50, 50, 100
+    local aimSpeed, aimStrength, fovRadius = 15, 1.0, 150
+    local aimTargetMode = "Closest" -- "Closest" или "Selected"
     local espColor = Color3.fromRGB(0, 150, 255)
-    local bv, bg
     local selectedPlayer = nil
 
+    -- Создание круга FOV (Drawing API)
+    local fovCircle = Drawing.new("Circle")
+    fovCircle.Visible = false
+    fovCircle.Radius = fovRadius
+    fovCircle.Color = Color3.fromRGB(255, 255, 255)
+    fovCircle.Thickness = 1.5
+    fovCircle.Filled = false
+    fovCircle.Transparency = 0.8
+
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.Space and isInfJumpEnabled and not isFlying then
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end)
+
+    -- Кнопки и настройки в интерфейсе
     CreateUIBtn(MainTab, "Toggle Fly Icon", function() FlyToggleBtn.Visible = not FlyToggleBtn.Visible end)
     CreateUIBtn(MainTab, "Toggle Shift Lock Icon", function() ShiftLockToggleBtn.Visible = not ShiftLockToggleBtn.Visible end)
     CreateInputBox(MainTab, "Fly Speed (50)", function(text) flySpeed = tonumber(text) or 50 end)
+
+    -- АИМБОТ НАСТРОЙКИ
+    local AimBtn = CreateUIBtn(MainTab, "AimBot: OFF", function() end)
+    AimBtn.MouseButton1Click:Connect(function()
+        isAimEnabled = not isAimEnabled
+        AimBtn.Text = "AimBot: " .. (isAimEnabled and "ON" or "OFF")
+        AimBtn.BackgroundColor3 = isAimEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(40, 40, 40)
+    end)
+
+    local AimModeBtn = CreateUIBtn(MainTab, "Aim Target: Closest in FOV", function() end)
+    AimModeBtn.MouseButton1Click:Connect(function()
+        if aimTargetMode == "Closest" then
+            aimTargetMode = "Selected"
+            AimModeBtn.Text = "Aim Target: Selected Player"
+        else
+            aimTargetMode = "Closest"
+            AimModeBtn.Text = "Aim Target: Closest in FOV"
+        end
+    end)
+
+    local FovVisBtn = CreateUIBtn(MainTab, "FOV Circle: ON", function() end)
+    FovVisBtn.MouseButton1Click:Connect(function()
+        isFovVisible = not isFovVisible
+        FovVisBtn.Text = "FOV Circle: " .. (isFovVisible and "ON" or "OFF")
+        FovVisBtn.BackgroundColor3 = isFovVisible and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(40, 40, 40)
+    end)
+
+    CreateInputBox(MainTab, "Aim Speed (15)", function(text) aimSpeed = tonumber(text) or 15 end)
+    CreateInputBox(MainTab, "Aim Strength / Pull (1.0)", function(text) aimStrength = tonumber(text) or 1.0 end)
+    CreateInputBox(MainTab, "FOV Radius (150)", function(text) 
+        fovRadius = tonumber(text) or 150 
+        fovCircle.Radius = fovRadius
+    end)
 
     local NoclipBtn = CreateUIBtn(MainTab, "Noclip: OFF", function() end)
     NoclipBtn.MouseButton1Click:Connect(function()
@@ -440,18 +496,59 @@ local function StartMainHub()
         UserInputService.MouseBehavior = isShiftLock and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
     end)
 
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.Space and isInfJumpEnabled and not isFlying then
-            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
-            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
-        end
-    end)
+    -- ФУНКЦИЯ ПОИСКА ЦЕЛИ (С УЧЕТОМ РЕЖИМА И FOV КРУГА)
+    local function GetTargetPart()
+        local cam = workspace.CurrentCamera
+        local viewportCenter = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
 
-    RunService.RenderStepped:Connect(function()
+        -- Режим 1: Строго выбранный игрок из вкладки Spectator
+        if aimTargetMode == "Selected" then
+            if selectedPlayer and selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local root = selectedPlayer.Character.HumanoidRootPart
+                local _, onScreen = cam:WorldToViewportPoint(root.Position)
+                if onScreen then
+                    return root
+                end
+            end
+            return nil
+        end
+
+        -- Режим 2: Ближайший игрок внутри FOV круга
+        local Closest = nil
+        local ShortestDist = fovRadius
+
+        for _, v in pairs(Players:GetPlayers()) do
+            if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+                local root = v.Character.HumanoidRootPart
+                local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
+                if onScreen then
+                    local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (screenPos2D - viewportCenter).Magnitude
+                    if dist < ShortestDist then
+                        ShortestDist = dist
+                        Closest = root
+                    end
+                end
+            end
+        end
+        return Closest
+    end
+
+    RunService.RenderStepped:Connect(function(dt)
+        local cam = workspace.CurrentCamera
+        local viewportCenter = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+
+        -- Обновление позиции круга FOV
+        if isAimEnabled and isFovVisible then
+            fovCircle.Position = viewportCenter
+            fovCircle.Visible = true
+        else
+            fovCircle.Visible = false
+        end
+
         local char = LocalPlayer.Character
         if not char then return end
-        local hum = char:FindFirstChild("Humanoid")
+        local hum = char:FindFirstChildOfClass("Humanoid")
         local hrp = char:FindFirstChild("HumanoidRootPart")
 
         if isNoclip then
@@ -463,7 +560,6 @@ local function StartMainHub()
         end
 
         if isShiftLock and hrp then
-            local cam = workspace.CurrentCamera
             local lookVec = cam.CFrame.LookVector
             local targetDir = Vector3.new(lookVec.X, 0, lookVec.Z)
             if targetDir.Magnitude > 0 then hrp.CFrame = CFrame.new(hrp.Position, hrp.Position + targetDir) end
@@ -482,42 +578,32 @@ local function StartMainHub()
             end
         end
 
-        -- НОВАЯ ЛОГИКА ПОЛЕТА ДЛЯ МОБИЛОК И ПК
-        if isFlying and hrp then
-            local cam = workspace.CurrentCamera
-            if not bv then bv = Instance.new("BodyVelocity", hrp); bv.MaxForce = Vector3.new(1e5, 1e5, 1e5) end
-            if not bg then bg = Instance.new("BodyGyro", hrp); bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5) end
-            
-            if hum then
-                hum.PlatformStand = true -- Отключаем физику ходьбы, чтобы не дрыгался
-                local moveDir = hum.MoveDirection
-                
-                if moveDir.Magnitude > 0 then
-                    -- Переводим направление джойстика в направление относительно камеры
-                    local flatForward = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z).Unit
-                    local flatRight = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z).Unit
-                    
-                    local yInput = flatForward:Dot(moveDir)
-                    local xInput = flatRight:Dot(moveDir)
-                    
-                    local flyDir = (cam.CFrame.LookVector * yInput) + (cam.CFrame.RightVector * xInput)
-                    
-                    if flyDir.Magnitude > 0 then
-                        bv.Velocity = flyDir.Unit * flySpeed
-                    else
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                    end
-                else
-                    bv.Velocity = Vector3.new(0, 0, 0) -- Мертвая остановка, когда джойстик отпущен
-                end
+        -- КАСТОМНЫЙ ПОЛЕТ (НОВАЯ ФИЗИКА)
+        if isFlying and hrp and hum then
+            hum.PlatformStand = true
+            if hum.MoveDirection.Magnitude > 0 then
+                local lookDir = cam.CFrame.LookVector
+                local finalDir = Vector3.new(hum.MoveDirection.X, lookDir.Y, hum.MoveDirection.Z).Unit
+                hrp.AssemblyLinearVelocity = finalDir * flySpeed
+            else
+                hrp.AssemblyLinearVelocity = Vector3.zero
             end
-            bg.CFrame = cam.CFrame
-        elseif bv then
-            bv:Destroy(); bv = nil
-            bg:Destroy(); bg = nil
-            if hum then hum.PlatformStand = false end -- Включаем физику обратно
+        else
+            if hum then hum.PlatformStand = false end
         end
-        -- КОНЕЦ НОВОЙ ЛОГИКИ
+
+        -- РАБОТА АИМА
+        if isAimEnabled then
+            local targetPart = GetTargetPart()
+            if targetPart then
+                local targetPos = targetPart.Position
+                local currentCF = cam.CFrame
+                local targetCF = CFrame.new(currentCF.Position, targetPos)
+                
+                local alpha = math.clamp(dt * aimSpeed * aimStrength, 0, 1)
+                cam.CFrame = currentCF:Lerp(targetCF, alpha)
+            end
+        end
 
         if isESP then
             for _, p in pairs(Players:GetPlayers()) do
