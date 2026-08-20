@@ -4,31 +4,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Stats = game:GetService("Stats")
 
-local function dec(bytes)
-    local t = {}
-    for _, b in ipairs(bytes) do
-        table.insert(t, string.char(b))
-    end
-    return table.concat(t)
-end
-
-local encryptedKeys = {
-    {79,83,84,82,65,45,57,88,50,77,45,52,76,56,75},
-    {79,83,84,82,65,45,55,66,51,80,45,49,72,53,78},
-    {79,83,84,82,65,45,53,68,56,87,45,57,90,50,88},
-    {79,83,84,82,65,45,49,67,52,70,45,54,74,53,86},
-    {79,83,84,82,65,45,56,82,56,84,45,50,75,57,89},
-    {79,83,84,82,65,45,51,72,57,76,45,53,77,57,81},
-    {79,83,84,82,65,45,54,78,50,86,45,56,80,49,87},
-    {79,83,84,82,65,45,52,88,51,75,45,51,74,57,70},
-    {79,83,84,82,65,45,57,90,56,89,45,49,84,57,72},
-    {79,83,84,82,65,45,50,70,49,81,45,52,77,56,68}
-}
-
-local validKeys = {}
-for _, v in ipairs(encryptedKeys) do
-    validKeys[dec(v)] = true
-end
+-- Ссылка на твой Flask сервер в Termux (Локальная)
+local SERVER_URL = "http://192.168.100.100:5000/check_key?key="
 
 if game:GetService("CoreGui"):FindFirstChild("Ostra19Hub") then
     game:GetService("CoreGui").Ostra19Hub:Destroy()
@@ -260,16 +237,14 @@ local function StartMainHub()
         return box
     end
 
-    -- Переменные функционала
     local isFlying, isESP, isNoclip, isShiftLock, isAimEnabled, isFovVisible = false, false, false, false, false, true
     local isSpeedEnabled, isStdJumpEnabled, isInfJumpEnabled = false, false, false
     local flySpeed, walkSpeed, jumpPower = 50, 50, 100
     local aimSpeed, aimStrength, fovRadius = 15, 1.0, 150
-    local aimTargetMode = "Closest" -- "Closest" или "Selected"
+    local aimTargetMode = "Closest"
     local espColor = Color3.fromRGB(0, 150, 255)
     local selectedPlayer = nil
 
-    -- Создание круга FOV (Drawing API)
     local fovCircle = Drawing.new("Circle")
     fovCircle.Visible = false
     fovCircle.Radius = fovRadius
@@ -286,12 +261,10 @@ local function StartMainHub()
         end
     end)
 
-    -- Кнопки и настройки в интерфейсе
     CreateUIBtn(MainTab, "Toggle Fly Icon", function() FlyToggleBtn.Visible = not FlyToggleBtn.Visible end)
     CreateUIBtn(MainTab, "Toggle Shift Lock Icon", function() ShiftLockToggleBtn.Visible = not ShiftLockToggleBtn.Visible end)
     CreateInputBox(MainTab, "Fly Speed (50)", function(text) flySpeed = tonumber(text) or 50 end)
 
-    -- АИМБОТ НАСТРОЙКИ
     local AimBtn = CreateUIBtn(MainTab, "AimBot: OFF", function() end)
     AimBtn.MouseButton1Click:Connect(function()
         isAimEnabled = not isAimEnabled
@@ -496,12 +469,10 @@ local function StartMainHub()
         UserInputService.MouseBehavior = isShiftLock and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
     end)
 
-    -- ФУНКЦИЯ ПОИСКА ЦЕЛИ (С УЧЕТОМ РЕЖИМА И FOV КРУГА)
     local function GetTargetPart()
         local cam = workspace.CurrentCamera
         local viewportCenter = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
 
-        -- Режим 1: Строго выбранный игрок из вкладки Spectator
         if aimTargetMode == "Selected" then
             if selectedPlayer and selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 local root = selectedPlayer.Character.HumanoidRootPart
@@ -513,7 +484,6 @@ local function StartMainHub()
             return nil
         end
 
-        -- Режим 2: Ближайший игрок внутри FOV круга
         local Closest = nil
         local ShortestDist = fovRadius
 
@@ -538,7 +508,6 @@ local function StartMainHub()
         local cam = workspace.CurrentCamera
         local viewportCenter = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
 
-        -- Обновление позиции круга FOV
         if isAimEnabled and isFovVisible then
             fovCircle.Position = viewportCenter
             fovCircle.Visible = true
@@ -578,7 +547,6 @@ local function StartMainHub()
             end
         end
 
-        -- КАСТОМНЫЙ ПОЛЕТ (НОВАЯ ФИЗИКА)
         if isFlying and hrp and hum then
             hum.PlatformStand = true
             if hum.MoveDirection.Magnitude > 0 then
@@ -592,7 +560,6 @@ local function StartMainHub()
             if hum then hum.PlatformStand = false end
         end
 
-        -- РАБОТА АИМА
         if isAimEnabled then
             local targetPart = GetTargetPart()
             if targetPart then
@@ -628,13 +595,21 @@ end
 
 SubmitBtn.MouseButton1Click:Connect(function()
     local enteredKey = KeyBox.Text
-    if validKeys[enteredKey] then
+    
+    StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    StatusLabel.Text = "Checking key..."
+
+    local success, response = pcall(function()
+        return game:HttpGet(SERVER_URL .. enteredKey)
+    end)
+
+    if success and string.find(response, "success") then
         StatusLabel.TextColor3 = Color3.fromRGB(50, 255, 50)
         StatusLabel.Text = "Success! Loading..."
         task.wait(0.5)
         StartMainHub()
     else
         StatusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-        StatusLabel.Text = "Invalid Key!"
+        StatusLabel.Text = "Invalid Key or Server Offline!"
     end
 end)
