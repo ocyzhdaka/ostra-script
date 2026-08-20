@@ -482,16 +482,42 @@ local function StartMainHub()
             end
         end
 
+        -- НОВАЯ ЛОГИКА ПОЛЕТА ДЛЯ МОБИЛОК И ПК
         if isFlying and hrp then
             local cam = workspace.CurrentCamera
             if not bv then bv = Instance.new("BodyVelocity", hrp); bv.MaxForce = Vector3.new(1e5, 1e5, 1e5) end
             if not bg then bg = Instance.new("BodyGyro", hrp); bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5) end
-            bv.Velocity = cam.CFrame.LookVector * flySpeed
+            
+            if hum then
+                hum.PlatformStand = true -- Отключаем физику ходьбы, чтобы не дрыгался
+                local moveDir = hum.MoveDirection
+                
+                if moveDir.Magnitude > 0 then
+                    -- Переводим направление джойстика в направление относительно камеры
+                    local flatForward = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z).Unit
+                    local flatRight = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z).Unit
+                    
+                    local yInput = flatForward:Dot(moveDir)
+                    local xInput = flatRight:Dot(moveDir)
+                    
+                    local flyDir = (cam.CFrame.LookVector * yInput) + (cam.CFrame.RightVector * xInput)
+                    
+                    if flyDir.Magnitude > 0 then
+                        bv.Velocity = flyDir.Unit * flySpeed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+                else
+                    bv.Velocity = Vector3.new(0, 0, 0) -- Мертвая остановка, когда джойстик отпущен
+                end
+            end
             bg.CFrame = cam.CFrame
         elseif bv then
             bv:Destroy(); bv = nil
             bg:Destroy(); bg = nil
+            if hum then hum.PlatformStand = false end -- Включаем физику обратно
         end
+        -- КОНЕЦ НОВОЙ ЛОГИКИ
 
         if isESP then
             for _, p in pairs(Players:GetPlayers()) do
