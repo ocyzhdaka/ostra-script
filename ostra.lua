@@ -5,7 +5,8 @@ local UserInputService = game:GetService("UserInputService")
 local Stats = game:GetService("Stats")
 
 -- Ссылка на твой Flask сервер в Termux (Локальная)
-local SERVER_URL = "http://192.168.100.100:5000/check_key?key="
+local SERVER_URL = "http://192.168.1.68:5000/check_key?key="
+
 
 if game:GetService("CoreGui"):FindFirstChild("Ostra19Hub") then
     game:GetService("CoreGui").Ostra19Hub:Destroy()
